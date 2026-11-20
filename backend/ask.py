@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from .ask_vendors import VendorFailure, complete
+from .ask_vendors import VendorFailure, get_completion
 
 DEFAULT_MODELS = {"openai": "gpt-4o-mini", "anthropic": "claude-haiku-4-5"}
 LOCAL_HOST = re.compile(r"(?:localhost|127\.0\.0\.1|\[::1\])(?::([0-9]{1,5}))?")
@@ -24,32 +24,32 @@ class Question(BaseModel):
     order_id: str | None = Field(default=None, min_length=1, max_length=80)
 
 
-def require_local(request):
-    denied = HTTPException(403, "Ask Mai requires a same-origin loopback request.")
+def require_local_request(request):
+    err_403 = HTTPException(403, "Ask Mai requires a same-origin loopback request.")
     try:
         if not request.client or not ip_address(request.client.host).is_loopback:
-            raise denied
+            raise err_403
     except ValueError:
-        raise denied from None
+        raise err_403 from None
     headers = request.headers
     hosts = headers.getlist("host")
     host = hosts[0].lower() if len(hosts) == 1 else ""
     match = LOCAL_HOST.fullmatch(host)
     if not match or (match[1] and not 1 <= int(match[1]) <= 65535):
-        raise denied
+        raise err_403
     if any(h == "forwarded" or h.startswith("x-forwarded-") for h in headers):
-        raise denied
+        raise err_403
     origins = headers.getlist("origin")
     if origins and origins != [f"{request.scope['scheme']}://{host}"]:
-        raise denied
+        raise err_403
     sites = headers.getlist("sec-fetch-site")
     if sites and sites != ["same-origin"] and not (request.method == "GET" and sites == ["none"]):
-        raise denied
+        raise err_403
 
 
-async def read_question(request):
-    types = request.headers.getlist("content-type")
-    if len(types) != 1 or types[0].partition(";")[0].strip().lower() != "application/json":
+async def read_question_body(request):
+    content_types = request.headers.getlist("content-type")
+    if len(content_types) != 1 or content_types[0].partition(";")[0].strip().lower() != "application/json":
         raise HTTPException(415, "Use application/json.")
     body = bytearray()
     async for chunk in request.stream():
@@ -62,38 +62,38 @@ async def read_question(request):
         raise HTTPException(422, "Invalid provider, question, or order ID.") from None
 
 
-def answer(store, env, args):
-    provider = args.provider
-    prefix = provider.upper()
-    key = env.get(prefix + "_API_KEY", "").strip()
+def run_ask(store, env, ask_req):
+    provider = ask_req.provider
+    env_prefix = provider.upper()
+    key = env.get(env_prefix + "_API_KEY", "").strip()
     if not key:
         raise HTTPException(503, "Selected provider is not configured.")
-    model = env.get(prefix + "_MODEL", "").strip() or DEFAULT_MODELS[provider]
-    snapshot = store.ask_snapshot(args.order_id)
-    context = json.dumps({**snapshot, "question": args.question}, ensure_ascii=False, separators=(",", ":"))
+    model = env.get(env_prefix + "_MODEL", "").strip() or DEFAULT_MODELS[provider]
+    snapshot = store.get_ask_snapshot(ask_req.order_id)
+    context = json.dumps({**snapshot, "question": ask_req.question}, ensure_ascii=False, separators=(",", ":"))
     if len(context.encode("utf-8")) > 8192:
         raise HTTPException(422, "Demo context is too large.")
     try:
-        return {"answer": complete(provider, key, model, context), "provider": provider}
+        return {"answer": get_completion(provider, key, model, context), "provider": provider}
     except VendorFailure:
         raise HTTPException(502, "Selected provider could not complete the request.") from None
 
 
-def ask_router(store, env=None):
+def build_ask_router(store, env=None):
     env = os.environ if env is None else env
     router = APIRouter(prefix="/api/ask")
 
     @router.get("/providers")
-    def providers(request: Request, response: Response):
-        require_local(request)
+    def get_providers(request: Request, response: Response):
+        require_local_request(request)
         response.headers["Cache-Control"] = "no-store"
-        return {p: bool(env.get(p.upper() + "_API_KEY", "").strip()) for p in ("openai", "anthropic")}
+        return {name: bool(env.get(name.upper() + "_API_KEY", "").strip()) for name in ("openai", "anthropic")}
 
     @router.post("")
     async def ask(request: Request, response: Response):
-        require_local(request)
-        args = await read_question(request)
+        require_local_request(request)
+        ask_req = await read_question_body(request)
         response.headers["Cache-Control"] = "no-store"
-        return await run_in_threadpool(answer, store, env, args)
+        return await run_in_threadpool(run_ask, store, env, ask_req)
 
     return router

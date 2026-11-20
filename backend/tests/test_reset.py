@@ -16,39 +16,39 @@ class ResetTest(unittest.TestCase):
         folder = TemporaryDirectory(dir=Path(__file__).parent)
         self.addCleanup(folder.cleanup)
         self.root = Path(folder.name)
-        self.path = self.root / ".demo" / "parcel.sqlite3"
+        self.db_path = self.root / ".demo" / "parcel.sqlite3"
 
-    def command(self, *args):
+    def run_reset(self, *args):
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
             return reset.main(args, root=self.root)
 
     def test_reset_only_restores_demo_data(self):
-        self.assertEqual(self.command(), 0)
-        note = self.path.with_name("keep.txt")
+        self.assertEqual(self.run_reset(), 0)
+        note = self.db_path.with_name("keep.txt")
         note.write_text("keep me", encoding="utf-8")
         with TestClient(create_app(self.root)) as client:
             original = client.get("/api/inventory").json()
             order = client.post("/api/orders", json={"sku": "ARC-01", "quantity": 2}).json()
-            self.assertEqual(self.command(), 0)
+            self.assertEqual(self.run_reset(), 0)
             self.assertEqual(client.get("/api/orders/" + order["id"]).status_code, 404)
             self.assertEqual(client.get("/api/inventory").json(), original)
         self.assertEqual(note.read_text(encoding="utf-8"), "keep me")
 
     def test_unmarked_database_is_not_changed(self):
-        self.path.parent.mkdir()
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("CREATE TABLE inventory (note TEXT)")
-            db.execute("INSERT INTO inventory VALUES ('unrelated stock notes')")
-        before = self.path.read_bytes()
-        self.assertNotEqual(self.command(), 0)
-        self.assertEqual(self.path.read_bytes(), before)
-        self.path.write_bytes(b"")
-        self.assertNotEqual(self.command(), 0)
-        self.assertEqual(self.path.read_bytes(), b"")
+        self.db_path.parent.mkdir()
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            conn.execute("CREATE TABLE inventory (note TEXT)")
+            conn.execute("INSERT INTO inventory VALUES ('unrelated stock notes')")
+        before = self.db_path.read_bytes()
+        self.assertNotEqual(self.run_reset(), 0)
+        self.assertEqual(self.db_path.read_bytes(), before)
+        self.db_path.write_bytes(b"")
+        self.assertNotEqual(self.run_reset(), 0)
+        self.assertEqual(self.db_path.read_bytes(), b"")
 
     def test_reset_does_not_accept_paths(self):
-        self.assertNotEqual(self.command(str(self.root / "other.sqlite3")), 0)
-        self.assertFalse(self.path.exists())
+        self.assertNotEqual(self.run_reset(str(self.root / "other.sqlite3")), 0)
+        self.assertFalse(self.db_path.exists())
         self.assertFalse((self.root / "other.sqlite3").exists())
 
     def test_reset_refuses_a_link_to_another_demo(self):
@@ -56,10 +56,10 @@ class ResetTest(unittest.TestCase):
         other.mkdir()
         with TestClient(create_app(other)) as client:
             order = client.post("/api/orders", json={"sku": "ARC-01", "quantity": 1}).json()
-            self.path.parent.mkdir()
+            self.db_path.parent.mkdir()
             try:
-                self.path.hardlink_to(other / ".demo" / "parcel.sqlite3")
+                self.db_path.hardlink_to(other / ".demo" / "parcel.sqlite3")
             except OSError as exc:
                 self.skipTest(f"Hard links unavailable: {exc}")
-            self.assertNotEqual(self.command(), 0)
+            self.assertNotEqual(self.run_reset(), 0)
             self.assertEqual(client.get("/api/orders/" + order["id"]).json(), order)

@@ -1,6 +1,6 @@
 import React from 'react';
 
-const glyphs = {
+const GLYPHS = {
   box: <><path d="m3 7 9-5 9 5v10l-9 5-9-5z M3 7l9 5 9-5 M12 12v10 M7.5 4.5l9 5" /></>,
   search: <><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></>,
   arrow: <path d="M4 12h15m-6-6 6 6-6 6"/>,
@@ -11,7 +11,7 @@ const glyphs = {
   close: <path d="m6 6 12 12M18 6 6 18"/>,
 };
 export function Icon({ name, size = 20 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{glyphs[name]}</svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">{GLYPHS[name]}</svg>;
 }
 
 export function CaseDrawing() {

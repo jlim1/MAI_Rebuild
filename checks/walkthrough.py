@@ -16,9 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @contextmanager
-def server(project):
-    log = project / 'server.log'
-    with log.open('w', encoding='utf-8') as output:
+def run_server(project):
+    log_path = project / 'server.log'
+    with log_path.open('w', encoding='utf-8') as output:
         proc = subprocess.Popen(
             [sys.executable, '-m', 'uvicorn', 'backend.app:app', '--host', '127.0.0.1', '--port', '0'],
             cwd=project, stdout=output, stderr=subprocess.STDOUT,
@@ -27,13 +27,13 @@ def server(project):
         try:
             deadline = time.monotonic() + 25
             while time.monotonic() < deadline and proc.poll() is None:
-                text = log.read_text(encoding='utf-8', errors='replace')
+                text = log_path.read_text(encoding='utf-8', errors='replace')
                 ready = re.search(r'Uvicorn running on (http://127\.0\.0\.1:\d+)', text)
                 if ready:
                     yield ready.group(1)
                     return
                 time.sleep(0.1)
-            raise RuntimeError('Local server did not start:\n' + log.read_text(errors='replace'))
+            raise RuntimeError('Local server did not start:\n' + log_path.read_text(errors='replace'))
         finally:
             if proc.poll() is None:
                 proc.terminate()
@@ -44,7 +44,7 @@ def server(project):
                 proc.wait()
 
 
-def run(check):
+def run_check(page_check):
     with TemporaryDirectory(prefix='parcel-check-') as scratch, sync_playwright() as p:
         project = Path(scratch)
         shutil.copytree(ROOT / 'backend', project / 'backend', ignore=shutil.ignore_patterns('__pycache__'))
@@ -57,7 +57,7 @@ def run(check):
             page = context.new_page()
             forbidden, errors = [], []
             page.on('pageerror', lambda error: errors.append(str(error)))
-            with server(project) as origin:
+            with run_server(project) as origin:
                 def local_only(route):
                     if urlsplit(route.request.url).netloc != urlsplit(origin).netloc:
                         forbidden.append(route.request.url)
@@ -66,9 +66,9 @@ def run(check):
                         route.continue_()
                 context.route('**/*', local_only)
                 page.goto(origin)
-                check(page)
+                page_check(page)
             subprocess.run([sys.executable, '-m', 'backend.reset'], cwd=project, check=True)
-            with server(project) as origin:
+            with run_server(project) as origin:
                 stock = context.request.get(origin + '/api/inventory?q=ARC-01').json()
                 assert stock[0]['available'] == 2 and stock[0]['reserved'] == 0, stock
             assert not forbidden, f'Unexpected external browser requests: {forbidden}'
@@ -79,25 +79,25 @@ def run(check):
 
 
 def walkthrough(page):
-    search = page.get_by_role('searchbox', name='Search inventory')
-    search.fill('nothing-matches-this')
+    search_box = page.get_by_role('searchbox', name='Search inventory')
+    search_box.fill('nothing-matches-this')
     expect(page.get_by_role('heading', name='No matching equipment')).to_be_visible()
-    search.fill('ARC-01')
-    reserve = page.get_by_role('button', name='Reserve Arc lamp')
-    reserve.click()
+    search_box.fill('ARC-01')
+    reserve_btn = page.get_by_role('button', name='Reserve Arc lamp')
+    reserve_btn.click()
     page.get_by_role('button', name='Confirm reservation').click()
-    lookup = page.get_by_label('Order ID', exact=True)
-    expect(lookup).not_to_have_value('')
-    order_id = lookup.input_value()
+    lookup_box = page.get_by_label('Order ID', exact=True)
+    expect(lookup_box).not_to_have_value('')
+    order_id = lookup_box.input_value()
     expect(page.get_by_label(f'Order {order_id}', exact=True)).to_be_visible()
-    reserve.click()
+    reserve_btn.click()
     page.get_by_role('spinbutton', name='Quantity').fill('2')
     page.get_by_role('button', name='Confirm reservation').click()
     expect(page.get_by_role('alert')).to_contain_text(re.compile('stock|available|shortage|insufficient', re.I))
     page.get_by_role('button', name='Cancel').click()
     page.reload()
     expect(page.get_by_label(f'Order {order_id}', exact=True)).to_be_visible()
-    lookup.fill(order_id)
+    lookup_box.fill(order_id)
     page.get_by_role('button', name='Look up order').click()
     for state in ['packed', 'shipped', 'delivered']:
         page.get_by_role('button', name=f'Mark as {state}').click()
@@ -112,4 +112,4 @@ def walkthrough(page):
 
 
 if __name__ == '__main__':
-    run(walkthrough)
+    run_check(walkthrough)

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { askMai, checkProviders } from '../src/ask.js';
 
 const configured = { openai: true, anthropic: false };
-const prompt = { configured, provider: 'openai', question: 'Which items are available?' };
+const askArgs = { configured, provider: 'openai', question: 'Which items are available?' };
 
 test('configuration check uses only the local GET and requires real booleans', async t => {
   let data = { openai: false, anthropic: false };
@@ -21,7 +21,7 @@ test('configuration check uses only the local GET and requires real booleans', a
 test('invalid provider, question or order never initiates a request', async t => {
   const spy = t.mock.method(globalThis, 'fetch', () => assert.fail('unexpected request'));
   for (const override of [{ provider: '' }, { provider: 'other' }, { provider: 'anthropic' }, { configured: null }, { question: '  ' }, { question: 'x'.repeat(801) }, { orderId: '../' }]) {
-    await assert.rejects(askMai({ ...prompt, ...override }));
+    await assert.rejects(askMai({ ...askArgs, ...override }));
   }
   assert.equal(spy.mock.callCount(), 0);
 });
@@ -36,19 +36,19 @@ test('send omits unapproved context; approved ID and exact-length question are a
     bodies.push(JSON.parse(opts.body));
     return Response.json({ provider: 'openai', answer });
   });
-  assert.deepEqual(await askMai(prompt), { provider: 'openai', answer });
+  assert.deepEqual(await askMai(askArgs), { provider: 'openai', answer });
   const question = 'Q'.repeat(800);
-  await askMai({ ...prompt, question, orderId: 'DEMO-1' });
-  assert.deepEqual(bodies, [{ provider: 'openai', question: prompt.question }, { provider: 'openai', question, order_id: 'DEMO-1' }]);
+  await askMai({ ...askArgs, question, orderId: 'DEMO-1' });
+  assert.deepEqual(bodies, [{ provider: 'openai', question: askArgs.question }, { provider: 'openai', question, order_id: 'DEMO-1' }]);
 });
 
 test('vendor failure or mismatched provider does not trigger a retry or fallback', async t => {
   const both = { openai: true, anthropic: true };
   let status = 503;
   const spy = t.mock.method(globalThis, 'fetch', async () => Response.json({ provider: 'anthropic', answer: 'wrong route' }, { status }));
-  await assert.rejects(askMai({ ...prompt, configured: both }), { status: 503 });
+  await assert.rejects(askMai({ ...askArgs, configured: both }), { status: 503 });
   assert.equal(spy.mock.callCount(), 1);
   status = 200;
-  await assert.rejects(askMai({ ...prompt, configured: both }), /selected provider/);
+  await assert.rejects(askMai({ ...askArgs, configured: both }), /selected provider/);
   assert.equal(spy.mock.callCount(), 2);
 });

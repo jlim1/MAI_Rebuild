@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { api } from '../src/api.js';
 import { LAST_ORDER_KEY, readOrderRef, saveOrderRef } from '../src/orderMemory.js';
 
-function locationFixture() {
+function makeTestWindow() {
   const map = new Map();
   const win = {
     location: new URL('http://127.0.0.1:8000/'),
@@ -14,7 +14,7 @@ function locationFixture() {
 }
 
 test('hash overrides local ID; stale reset removes both and preserves the page query', () => {
-  const win = locationFixture();
+  const win = makeTestWindow();
   win.location.search = '?desk=1';
   saveOrderRef('case #2',win);
   assert.equal(win.location.hash,'#order=case+%232');
@@ -31,7 +31,7 @@ test('hash overrides local ID; stale reset removes both and preserves the page q
 });
 
 test('order ID survives refresh by hash alone when persistent storage is disabled', () => {
-  const win = locationFixture();
+  const win = makeTestWindow();
   Object.defineProperty(win,'localStorage',{ get() { throw Error('Unavailable'); } });
   saveOrderRef('mock-3',win);
   assert.equal(readOrderRef(win).id,'mock-3');

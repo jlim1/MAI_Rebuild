@@ -20,24 +20,24 @@ class VendorFailure(Exception):
     pass
 
 
-def complete(provider, key, model, context):
-    user = {"role": "user", "content": context}
+def get_completion(provider, key, model, context):
+    user_msg = {"role": "user", "content": context}
     headers = {"Content-Type": "application/json"}
     if provider == "openai":
         host, path = "api.openai.com", "/v1/chat/completions"
         headers["Authorization"] = f"Bearer {key}"
-        body = {"model": model, "messages": [{"role": "system", "content": SYSTEM}, user],
+        body = {"model": model, "messages": [{"role": "system", "content": SYSTEM}, user_msg],
                 "max_completion_tokens": OUTPUT_TOKENS}
     elif provider == "anthropic":
         host, path = "api.anthropic.com", "/v1/messages"
         headers.update({"x-api-key": key, "anthropic-version": "2023-06-01"})
-        body = {"model": model, "system": SYSTEM, "messages": [user], "max_tokens": OUTPUT_TOKENS}
+        body = {"model": model, "system": SYSTEM, "messages": [user_msg], "max_tokens": OUTPUT_TOKENS}
     else:
         raise VendorFailure()
     try:
-        with closing(http.client.HTTPSConnection(host, timeout=10)) as connection:
-            connection.request("POST", path, headers=headers, body=json.dumps(body).encode("utf-8"))
-            with closing(connection.getresponse()) as response:
+        with closing(http.client.HTTPSConnection(host, timeout=10)) as conn:
+            conn.request("POST", path, headers=headers, body=json.dumps(body).encode("utf-8"))
+            with closing(conn.getresponse()) as response:
                 if response.status != 200:
                     raise VendorFailure()
                 raw = response.read(MAX_REPLY_BYTES + 1)

@@ -3,26 +3,26 @@ import { api } from './api.js';
 import { Icon, PanelTitle } from './graphics.jsx';
 
 function ReserveDialog({ item, onClose, onSuccess, onRefresh }) {
-  const ref = useRef(null);
-  const guard = useRef(false);
+  const dialogRef = useRef(null);
+  const submitLock = useRef(false);
   const [quantity, setQuantity] = useState('1');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
-    const dialog = ref.current;
+    const dialog = dialogRef.current;
     dialog.showModal();
     return () => dialog.close();
   }, []);
 
-  async function submit(event) {
+  async function onSubmit(event) {
     event.preventDefault();
-    if (guard.current) return;
+    if (submitLock.current) return;
     const count = Number(quantity);
     if (!Number.isSafeInteger(count) || count < 1) {
       setError('Enter a positive whole number.');
       return;
     }
-    guard.current = true;
+    submitLock.current = true;
     setBusy(true);
     setError('');
     try {
@@ -33,13 +33,13 @@ function ReserveDialog({ item, onClose, onSuccess, onRefresh }) {
       setError(`${shortage ? 'Not enough stock. ' : ''}${err.message}`);
       onRefresh();
     } finally {
-      guard.current = false;
+      submitLock.current = false;
       setBusy(false);
     }
   }
 
-  return <dialog ref={ref} aria-labelledby="reserve-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
-    <form onSubmit={submit}>
+  return <dialog ref={dialogRef} aria-labelledby="reserve-title" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <form onSubmit={onSubmit}>
       <div className="eyebrow accent">RESERVATION / SIMULATED</div>
       <h2 id="reserve-title">Reserve equipment</h2>
       <div className="picked"><Icon name="box" size={28}/><div><strong>{item.name}</strong><small className="mono">{item.sku}</small></div><span className="stock-tag">{item.available} available</span></div>
@@ -52,11 +52,11 @@ function ReserveDialog({ item, onClose, onSuccess, onRefresh }) {
   </dialog>;
 }
 
-export function Inventory({ revision, onRefresh, onReserved, orderBusy }) {
+export function Inventory({ refreshKey, onRefresh, onReserved, orderBusy }) {
   const [query, setQuery] = useState('');
   const [state, setState] = useState({ phase: 'loading', rows: [] });
   const [selected, setSelected] = useState(null);
-  const search = useRef(null);
+  const searchBox = useRef(null);
   useEffect(() => {
     const controller = new AbortController();
     setState({ phase: 'loading', rows: [] });
@@ -69,12 +69,12 @@ export function Inventory({ revision, onRefresh, onReserved, orderBusy }) {
       }
     }, query ? 180 : 0);
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [query, revision]);
+  }, [query, refreshKey]);
   const { rows, phase } = state;
-  function clear() { setQuery(''); search.current?.focus(); }
+  function clearSearch() { setQuery(''); searchBox.current?.focus(); }
   return <section className="panel inventory" aria-labelledby="inventory-title">
     <PanelTitle icon="stock" index="01" id="inventory-title" action={<button className="icon-button" aria-label="Refresh inventory" title="Refresh inventory" onClick={onRefresh}><Icon name="refresh" size={17}/></button>}>Equipment inventory</PanelTitle>
-    <div className="search-wrap"><label htmlFor="inventory-query">Search inventory</label><div className="search-field"><Icon name="search" size={19}/><input ref={search} id="inventory-query" type="search" autoComplete="off" placeholder="Item name or SKU" value={query} onChange={e => setQuery(e.target.value)}/>{query && <button className="mini-icon" aria-label="Clear search" onClick={clear}><Icon name="close" size={16}/></button>}</div></div>
+    <div className="search-wrap"><label htmlFor="inventory-query">Search inventory</label><div className="search-field"><Icon name="search" size={19}/><input ref={searchBox} id="inventory-query" type="search" autoComplete="off" placeholder="Item name or SKU" value={query} onChange={e => setQuery(e.target.value)}/>{query && <button className="mini-icon" aria-label="Clear search" onClick={clearSearch}><Icon name="close" size={16}/></button>}</div></div>
     <div className="ledger-strip"><span>STOCK REGISTER</span><span role="status">{phase === 'ready' ? `${rows.length} ${rows.length === 1 ? 'ITEM' : 'ITEMS'}` : '—'}</span></div>
     {phase === 'loading' ? <p className="empty-block" role="status">Loading inventory…</p> : phase === 'error' ? <div className="panel-message"><p className="notice error" role="alert">{state.message}</p><button className="secondary" onClick={onRefresh}>Retry inventory</button></div> : rows.length === 0 ? <div className="empty-block" role="status"><Icon name="search" size={27}/><h3>{query ? 'No matching equipment' : 'No equipment yet'}</h3><p>{query ? 'Try a different name or SKU.' : 'The local inventory is empty.'}</p></div> :
       <ul className="equipment-list" aria-label="Inventory results">{rows.map(item => <li key={item.sku}>

@@ -20,10 +20,10 @@ def main():
     with warnings.catch_warnings():
         warnings.simplefilter('error', getpass.GetPassWarning)
         try:
-            for provider, variable in [('OpenAI', 'OPENAI_API_KEY'), ('Anthropic', 'ANTHROPIC_API_KEY')]:
+            for provider, env_name in [('OpenAI', 'OPENAI_API_KEY'), ('Anthropic', 'ANTHROPIC_API_KEY')]:
                 key = getpass.getpass(f'{provider} API key (hidden): ').strip()
                 if key:
-                    os.environ[variable] = key
+                    os.environ[env_name] = key
         except getpass.GetPassWarning:
             raise SystemExit('A hidden prompt is unavailable here. No server was started.') from None
         except (KeyboardInterrupt, EOFError):

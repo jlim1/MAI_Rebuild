@@ -1,4 +1,4 @@
-import { validId } from './api.js';
+import { isValidId } from './api.js';
 
 export const LAST_ORDER_KEY = 'parcel-workbench:last-order-id';
 
@@ -9,7 +9,7 @@ export function readOrderRef(win = window) {
   if (id === null) {
     try { id = win.localStorage.getItem(LAST_ORDER_KEY); } catch { /* Storage can be disabled. */ }
   }
-  return { id: validId(id) ? id : '', invalid: id !== null && !validId(id) };
+  return { id: isValidId(id) ? id : '', invalid: id !== null && !isValidId(id) };
 }
 
 export function saveOrderRef(id, win = window) {

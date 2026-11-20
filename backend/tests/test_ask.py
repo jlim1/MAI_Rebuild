@@ -30,16 +30,16 @@ class AskTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/health").status_code, 200)
         self.connect.assert_not_called()
 
-    def reply(self, payload, status=200):
+    def set_reply(self, payload, status=200):
         response = self.connect.return_value.getresponse.return_value
         response.status = status
         response.read.return_value = json.dumps(payload).encode()
 
-    def ask(self, **fields):
+    def post_ask(self, **fields):
         return self.client.post("/api/ask", json={"provider": "openai", "question": "  What is available?  ", **fields},
                                 headers={"Origin": "http://127.0.0.1:8000"})
 
-    def wire(self, host, path):
+    def get_request(self, host, path):
         self.connect.assert_called_once_with(host, timeout=10)
         send = self.connect.return_value.request
         send.assert_called_once()
@@ -48,14 +48,14 @@ class AskTest(unittest.TestCase):
         return kwargs["headers"], json.loads(kwargs["body"])
 
     def test_openai_receives_only_selected_order_and_its_own_key(self):
-        def reserve():
+        def post_reserve():
             return self.client.post("/api/orders", json={"sku": "ARC-01", "quantity": 1}).json()
-        selected, other = reserve(), reserve()
-        self.reply({"choices": [{"message": {"content": " Both lamps are reserved. "}}]})
-        result = self.ask(order_id=selected["id"])
+        selected, other = post_reserve(), post_reserve()
+        self.set_reply({"choices": [{"message": {"content": " Both lamps are reserved. "}}]})
+        result = self.post_ask(order_id=selected["id"])
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json(), {"provider": "openai", "answer": "Both lamps are reserved."})
-        headers, data = self.wire("api.openai.com", "/v1/chat/completions")
+        headers, data = self.get_request("api.openai.com", "/v1/chat/completions")
         self.assertEqual(headers["Authorization"], "Bearer fake-openai")
         self.assertNotIn("fake-anthropic", str(headers) + str(data))
         self.assertEqual(data["model"], "gpt-4o-mini")
@@ -70,10 +70,10 @@ class AskTest(unittest.TestCase):
     def test_anthropic_receives_only_its_key_and_model_and_no_unselected_order(self):
         order = self.client.post("/api/orders", json={"sku": "ARC-01", "quantity": 1}).json()
         self.env["ANTHROPIC_MODEL"] = "demo-model-override"
-        self.reply({"content": [{"type": "text", "text": "One lamp"}, {"type": "text", "text": "remains."}]})
-        result = self.ask(provider="anthropic")
+        self.set_reply({"content": [{"type": "text", "text": "One lamp"}, {"type": "text", "text": "remains."}]})
+        result = self.post_ask(provider="anthropic")
         self.assertEqual(result.json(), {"provider": "anthropic", "answer": "One lamp\nremains."})
-        headers, data = self.wire("api.anthropic.com", "/v1/messages")
+        headers, data = self.get_request("api.anthropic.com", "/v1/messages")
         self.assertEqual(headers["x-api-key"], "fake-anthropic")
         self.assertEqual(headers["anthropic-version"], "2023-06-01")
         self.assertNotIn("Authorization", headers)
@@ -103,14 +103,14 @@ class AskTest(unittest.TestCase):
         for fields in ({"provider": "other"}, {"question": "  "}, {"question": "x" * 801},
                        {"order_id": 42}, {"context": "unsolicited"}):
             with self.subTest(fields=fields):
-                self.assertEqual(self.ask(**fields).status_code, 422)
+                self.assertEqual(self.post_ask(**fields).status_code, 422)
         for mime, message, code in (("text/plain", "{}", 415), ("application/json", "bad", 422),
                                     ("application/json", "x" * 17000, 413)):
             r = self.client.post("/api/ask", content=message, headers={"Content-Type": mime})
             self.assertEqual(r.status_code, code)
-        self.assertEqual(self.ask(order_id="unknown").status_code, 404)
+        self.assertEqual(self.post_ask(order_id="unknown").status_code, 404)
         del self.env["OPENAI_API_KEY"]
-        self.assertEqual(self.ask().status_code, 503)  # No fallback to the configured vendor.
+        self.assertEqual(self.post_ask().status_code, 503)  # No fallback to the configured vendor.
         self.connect.assert_not_called()
 
     def test_upstream_errors_are_generic_and_never_retried(self):
@@ -125,7 +125,7 @@ class AskTest(unittest.TestCase):
                 upstream = self.connect.return_value.getresponse.return_value
                 upstream.status = status
                 upstream.read.return_value = body
-                r = self.ask(provider=provider)
+                r = self.post_ask(provider=provider)
                 self.assertEqual((r.status_code, r.json()), (502, expected))
                 self.connect.assert_called_once()
                 self.connect.return_value.request.assert_called_once()
@@ -135,14 +135,14 @@ class AskTest(unittest.TestCase):
                     upstream.read.assert_not_called()
         self.connect.reset_mock()
         self.connect.return_value.getresponse.side_effect = TimeoutError("private timeout details")
-        r = self.ask()
+        r = self.post_ask()
         self.assertEqual((r.status_code, r.json()), (502, expected))
         self.connect.return_value.request.assert_called_once()
 
     def test_boundary_question_and_output_limits(self):
-        self.reply({"content": [{"type": "text", "text": "a" * 3000}]})
-        r = self.ask(provider="anthropic", question=" " + "x" * 800 + " ", order_id=None)
+        self.set_reply({"content": [{"type": "text", "text": "a" * 3000}]})
+        r = self.post_ask(provider="anthropic", question=" " + "x" * 800 + " ", order_id=None)
         self.assertEqual(r.status_code, 200)
         self.assertEqual(len(r.json()["answer"]), 2400)
-        _, data = self.wire("api.anthropic.com", "/v1/messages")
+        _, data = self.get_request("api.anthropic.com", "/v1/messages")
         self.assertEqual(data["model"], "claude-haiku-4-5")
